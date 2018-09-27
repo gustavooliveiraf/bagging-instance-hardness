@@ -102,11 +102,24 @@ class Main:
         for i in score_tuple:
             score.append(i[0])
 
+        print("=============")
+        print("score_tuple", score_tuple[0][1])
+
         return score
+
+    def calc_metrics(self, y_samples, y_true):
+        proc_auc_score_temp = roc_auc_score(y_samples, y_true)
+        geometric_mean_score_temp = geometric_mean_score(y_samples, y_true)
+        f1_score_temp = f1_score(y_samples, y_true)
+
+        return (proc_auc_score_temp, geometric_mean_score_temp, f1_score_temp)
 
     def pruning(self, k_fold, n_times):
         score_pruning = 0
         score_pool = 0
+
+        score_pruning = (0,0,0,0)
+        score_pool = (0,0,0,0)
         for i in range(n_times):
             skf = StratifiedKFold(n_splits=k_fold,shuffle=True)
 
@@ -118,27 +131,37 @@ class Main:
                 # x_train, y_train = X_train, Y_train
                 # x_test, y_test = SMOTE().fit_sample(X_test, Y_test)
 
-                # kdnGreater, kdnLess = self.k_Disagreeing_neighbors_kDN(x_train, y_train)
-
-                # X_validationGreater, X_validationLess = x_train[kdnGreater], x_train[kdnLess]
-                # Y_validationGreater, Y_validationLess = y_train[kdnGreater], y_train[kdnLess]
+                # =========
+                kdnGreater, kdnLess = self.k_Disagreeing_neighbors_kDN(x_train, y_train)
+                X_validationGreater, X_validationLess = x_train[kdnGreater], x_train[kdnLess]
+                Y_validationGreater, Y_validationLess = y_train[kdnGreater], y_train[kdnLess]
+                # ==========
 
                 BagPercep = BaggingClassifier(linear_model.Perceptron(max_iter=5), self.pool_size)
                 BagPercep.fit(x_train, y_train)
+                score_pool_temp = (BagPercep.score(X_test, Y_test), ) + self.calc_metrics(BagPercep.predict(X_test), Y_test)
+                score_pool = tuple(map(sum, zip(score_pool, score_pool_temp)))
 
-                score_pool_temp = BagPercep.score(X_test, Y_test)
-                score_pool += score_pool_temp
+                # score = self.sort_score(BagPercep, X_validationGreater, Y_validationGreater)
+                # score_pruning_temp = self.reduce_error(BagPercep, score, x_train, y_train, X_validationGreater, Y_validationGreater, X_test, Y_test)
 
-                score = self.sort_score(BagPercep, x_train, y_train)
-                # score_pruning += self.reduce_error(BagPercep, score, x_train, y_train, x_train, y_train)
-                score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, x_train, y_train)
-                score_pruning += score_pruning_temp
+                # score = self.sort_score(BagPercep, X_validationLess, Y_validationLess)
+                # score_pruning_temp = self.reduce_error(BagPercep, score, x_train, y_train, X_validationLess, Y_validationLess, X_test, Y_test)
+                
+                score = self.sort_score(BagPercep, x_train, y_train) # so executar uma vez ------------
+                score_pruning_temp = self.reduce_error(BagPercep, score, x_train, y_train, x_train, y_train, X_test, Y_test)
+
+                # score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, X_validationGreater, Y_validationGreater, X_test, Y_test)
+                # score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, X_validationLess, Y_validationLess, X_test, Y_test)
+                # score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, x_train, y_train, X_test, Y_test)
+                score_pruning = tuple(map(sum, zip(score_pruning, score_pruning_temp)))
 
                 print(score_pool_temp, score_pruning_temp)
+                print("=================")
 
-        return (score_pool/k_fold, score_pruning/k_fold)
+        return (tuple(map(lambda x: x/10, score_pool)), tuple(map(lambda x: x/10, score_pruning)))
 
-    def reduce_error(self, pool, score_index, x_train, y_train, x_validation, y_validation):
+    def reduce_error(self, pool, score_index, x_train, y_train, x_validation, y_validation, x_test, y_test):
         BagPercepCurrent = BaggingClassifier(linear_model.Perceptron(max_iter=5), self.pool_size)
         BagPercepCurrent.fit(x_train, y_train)
 
@@ -147,10 +170,17 @@ class Main:
 
         ensemble = []
         ensemble.append(pool.estimators_[score_index[0]])
+
+        BagPercepCurrent.estimators_ = ensemble
+        best_score = BagPercepCurrent.score(x_validation, y_validation)
+        # metrics = (None, None, None, None)
         while (True):
             index_best_score = 0
             BagPercepCurrent.estimators_ = ensemble
-            best_score = BagPercepCurrent.score(x_validation, y_validation)
+            best_score_test = BagPercepCurrent.score(x_test, y_test)
+
+            metrics = (best_score_test,) + self.calc_metrics(BagPercepCurrent.predict(x_test), y_test)
+            print(metrics)
 
             for i in list(score_index):
                 if i not in ensemble_index:
@@ -158,32 +188,41 @@ class Main:
                     score_current = BagPercepCurrent.score(x_validation, y_validation)
 
                     if best_score < score_current:
+                        best_score = score_current
                         index_best_score = i
             if index_best_score != 0:
                 ensemble_index.add(index_best_score)
                 ensemble.append(pool.estimators_[index_best_score])
             else:
-                return best_score
+                print("best index", len(ensemble), best_score, best_score_test)
+                return metrics
             if len(ensemble_index) == self.pool_size:
-                return best_score
-                break
+                return metrics
 
-    def best_first(self, pool, score_index, x_train, y_train,  x_validation, y_validation):
+    def best_first(self, pool, score_index, x_train, y_train,  x_validation, y_validation, x_test, y_test):
         BagPercepCurrent = BaggingClassifier(linear_model.Perceptron(max_iter=5), self.pool_size)
         BagPercepCurrent.fit(x_train, y_train)
 
         BagPercepCurrent.estimators_ = [pool.estimators_[score_index[0]]]
-        best_score = BagPercepCurrent.score(x_validation, y_validation)        
-        for i in list(score_index[1:]):
-            BagPercepCurrent.estimators_ += [pool.estimators_[i]]
+        best_score = BagPercepCurrent.score(x_validation, y_validation)
+        best_index = 1
+        best_score_test = 0
+        for i, j in enumerate(list(score_index[1:])):
+            BagPercepCurrent.estimators_ += [pool.estimators_[j]]
             score_current = BagPercepCurrent.score(x_validation, y_validation)
 
             if best_score < score_current:
                 best_score = score_current
-            else:
-                return best_score
-        return best_score
+                best_index = i
+                best_score_test = BagPercepCurrent.score(x_test, y_test)
 
+        best_index += 2
+        # print("best index", best_index, best_score, best_score_test)
+        return best_score_test
+
+# =============================================================================================================================
+
+    # def 
 def test_kappa(modelo):
     # modelo.kNeighborsClassifier()
     best_classifiers = modelo.kappa_pruning(10, 1, 10, 5) #retorna os 3 conjuntos de classificadores a b c
