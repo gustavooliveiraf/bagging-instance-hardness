@@ -30,7 +30,7 @@ class Main:
         self.data = data
         self.y = np.array(y)
         self.x = np.array(x)
-        self.kNeighbors = 5
+        self.kNeighbors = 5 # lembrar de testar com 7 ============================
         self.threshold = 0.5
         self.kdnGreater = [] # ThanThreshold
         self.kdnLess = [] # ThanThreshold
@@ -104,7 +104,7 @@ class Main:
 
         return score
 
-    def reduce_error_pre(self, k_fold, n_times):
+    def pruning(self, k_fold, n_times):
         score_pruning = 0
         score_pool = 0
         for i in range(n_times):
@@ -126,14 +126,15 @@ class Main:
                 BagPercep = BaggingClassifier(linear_model.Perceptron(max_iter=5), self.pool_size)
                 BagPercep.fit(x_train, y_train)
 
-                score_pool += BagPercep.score(X_test, Y_test)
-                # score_pool += score_pool_temp
+                score_pool_temp = BagPercep.score(X_test, Y_test)
+                score_pool += score_pool_temp
 
                 score = self.sort_score(BagPercep, x_train, y_train)
-                score_pruning += self.reduce_error(BagPercep, score, x_train, y_train, x_train, y_train)
-                # score_pruning += score_pruning_temp
+                # score_pruning += self.reduce_error(BagPercep, score, x_train, y_train, x_train, y_train)
+                score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, x_train, y_train)
+                score_pruning += score_pruning_temp
 
-                print(score_pool, score_pruning)
+                print(score_pool_temp, score_pruning_temp)
 
         return (score_pool/k_fold, score_pruning/k_fold)
 
@@ -167,6 +168,22 @@ class Main:
                 return best_score
                 break
 
+    def best_first(self, pool, score_index, x_train, y_train,  x_validation, y_validation):
+        BagPercepCurrent = BaggingClassifier(linear_model.Perceptron(max_iter=5), self.pool_size)
+        BagPercepCurrent.fit(x_train, y_train)
+
+        BagPercepCurrent.estimators_ = [pool.estimators_[score_index[0]]]
+        best_score = BagPercepCurrent.score(x_validation, y_validation)        
+        for i in list(score_index[1:]):
+            BagPercepCurrent.estimators_ += [pool.estimators_[i]]
+            score_current = BagPercepCurrent.score(x_validation, y_validation)
+
+            if best_score < score_current:
+                best_score = score_current
+            else:
+                return best_score
+        return best_score
+
 def test_kappa(modelo):
     # modelo.kNeighborsClassifier()
     best_classifiers = modelo.kappa_pruning(10, 1, 10, 5) #retorna os 3 conjuntos de classificadores a b c
@@ -187,8 +204,8 @@ def test_kappa(modelo):
 
     print(list(ensemble))
 
-def test_reduce(modelo):
-    print(modelo.reduce_error_pre(10, 1))
+def test_pruninge(modelo):
+    print(modelo.pruning(10, 1))
 
 # test
 data = pd.read_csv('./cm1.csv')
@@ -206,4 +223,4 @@ x = scaler.fit_transform(x)
 
 modelo = Main(x, y)
 
-test_reduce(modelo)
+test_pruninge(modelo)
