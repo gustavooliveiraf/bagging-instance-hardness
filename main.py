@@ -53,8 +53,8 @@ class Main:
 
                 kdnGreater, kdnLess = self.k_Disagreeing_neighbors_kDN(x_train, y_train)
 
-                X_validationGreater, X_validationLess = self.x[kdnGreater], self.x[kdnLess]
-                Y_validationGreater, Y_validationLess = self.y[kdnGreater], self.y[kdnLess]
+                # X_validationGreater, X_validationLess = self.x[kdnGreater], self.x[kdnLess]
+                # Y_validationGreater, Y_validationLess = self.y[kdnGreater], self.y[kdnLess]
 
                 BagPercep = BaggingClassifier(linear_model.Perceptron(max_iter=5), pool_size)
                 BagPercep.fit(x_train, y_train)
@@ -62,11 +62,11 @@ class Main:
                     kappa = cohen_kappa_score(BagPercep.estimators_[tupla[0]].predict(x_train), BagPercep.estimators_[tupla[1]].predict(x_train))
                     pruning.append(tupla + (kappa,))
 
-                    kappa = cohen_kappa_score(BagPercep.estimators_[tupla[0]].predict(X_validationGreater), BagPercep.estimators_[tupla[1]].predict(X_validationGreater))
-                    pruningKdnGreater.append(tupla + (kappa,))
+                    # kappa = cohen_kappa_score(BagPercep.estimators_[tupla[0]].predict(X_validationGreater), BagPercep.estimators_[tupla[1]].predict(X_validationGreater))
+                    # pruningKdnGreater.append(tupla + (kappa,))
 
-                    kappa = cohen_kappa_score(BagPercep.estimators_[tupla[0]].predict(X_validationLess), BagPercep.estimators_[tupla[1]].predict(X_validationLess))
-                    pruningKdnLess.append(tupla + (kappa,))
+                    # kappa = cohen_kappa_score(BagPercep.estimators_[tupla[0]].predict(X_validationLess), BagPercep.estimators_[tupla[1]].predict(X_validationLess))
+                    # pruningKdnLess.append(tupla + (kappa,))
                 break
         
         pruning.sort(key=lambda tup: tup[2])
@@ -102,8 +102,8 @@ class Main:
         for i in score_tuple:
             score.append(i[0])
 
-        print("=============")
-        print("score_tuple", score_tuple[0][1])
+        # print("=============")
+        # print("score_tuple", score_tuple[0][1])
 
         return score
 
@@ -114,12 +114,22 @@ class Main:
 
         return (proc_auc_score_temp, geometric_mean_score_temp, f1_score_temp)
 
+    def pairwise_diversity_measure(self, BagPercep, pool_size, x):
+        comb = combinations(range(pool_size), 2)
+        kappa = 0
+        for tupla in comb:
+            kappa += cohen_kappa_score(BagPercep.estimators_[tupla[0]].predict(x), BagPercep.estimators_[tupla[1]].predict(x))
+
+        return (2/(pool_size*(pool_size-1)))*kappa
+
+# =============================================================================================================================
+
     def pruning(self, k_fold, n_times):
         score_pruning = 0
         score_pool = 0
 
-        score_pruning = (0,0,0,0)
-        score_pool = (0,0,0,0)
+        score_pruning = (0,0,0,0,0)
+        score_pool = (0,0,0,0,0)
         for i in range(n_times):
             skf = StratifiedKFold(n_splits=k_fold,shuffle=True)
 
@@ -139,7 +149,9 @@ class Main:
 
                 BagPercep = BaggingClassifier(linear_model.Perceptron(max_iter=5), self.pool_size)
                 BagPercep.fit(x_train, y_train)
-                score_pool_temp = (BagPercep.score(X_test, Y_test), ) + self.calc_metrics(BagPercep.predict(X_test), Y_test)
+                diversity = self.pairwise_diversity_measure(BagPercep, len(BagPercep.estimators_), X_test)
+                score_pool_temp = (BagPercep.score(X_test, Y_test), ) + self.calc_metrics(BagPercep.predict(X_test), Y_test) + (diversity, )
+                
                 score_pool = tuple(map(sum, zip(score_pool, score_pool_temp)))
 
                 # score = self.sort_score(BagPercep, X_validationGreater, Y_validationGreater)
@@ -149,17 +161,17 @@ class Main:
                 # score_pruning_temp = self.reduce_error(BagPercep, score, x_train, y_train, X_validationLess, Y_validationLess, X_test, Y_test)
                 
                 score = self.sort_score(BagPercep, x_train, y_train) # so executar uma vez ------------
-                score_pruning_temp = self.reduce_error(BagPercep, score, x_train, y_train, x_train, y_train, X_test, Y_test)
+                # score_pruning_temp = self.reduce_error(BagPercep, score, x_train, y_train, x_train, y_train, X_test, Y_test)
 
                 # score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, X_validationGreater, Y_validationGreater, X_test, Y_test)
                 # score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, X_validationLess, Y_validationLess, X_test, Y_test)
-                # score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, x_train, y_train, X_test, Y_test)
+                score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, x_train, y_train, X_test, Y_test)
                 score_pruning = tuple(map(sum, zip(score_pruning, score_pruning_temp)))
 
-                print(score_pool_temp, score_pruning_temp)
+                print(score_pool_temp, "---", score_pruning_temp)
                 print("=================")
 
-        return (tuple(map(lambda x: x/10, score_pool)), tuple(map(lambda x: x/10, score_pruning)))
+        return (tuple(map(lambda x: x/k_fold, score_pool)), tuple(map(lambda x: x/k_fold, score_pruning)))
 
     def reduce_error(self, pool, score_index, x_train, y_train, x_validation, y_validation, x_test, y_test):
         BagPercepCurrent = BaggingClassifier(linear_model.Perceptron(max_iter=5), self.pool_size)
@@ -180,7 +192,7 @@ class Main:
             best_score_test = BagPercepCurrent.score(x_test, y_test)
 
             metrics = (best_score_test,) + self.calc_metrics(BagPercepCurrent.predict(x_test), y_test)
-            print(metrics)
+            # print(metrics)
 
             for i in list(score_index):
                 if i not in ensemble_index:
@@ -194,10 +206,11 @@ class Main:
                 ensemble_index.add(index_best_score)
                 ensemble.append(pool.estimators_[index_best_score])
             else:
-                print("best index", len(ensemble), best_score, best_score_test)
-                return metrics
+                # print("best index", len(ensemble), best_score, best_score_test)
+                diversity_kappa = self.pairwise_diversity_measure(BagPercepCurrent, len(BagPercepCurrent.estimators_), x_validation)
+                return [metrics, diversity_kappa]
             if len(ensemble_index) == self.pool_size:
-                return metrics
+                return [metrics, diversity_kappa]
 
     def best_first(self, pool, score_index, x_train, y_train,  x_validation, y_validation, x_test, y_test):
         BagPercepCurrent = BaggingClassifier(linear_model.Perceptron(max_iter=5), self.pool_size)
@@ -205,8 +218,11 @@ class Main:
 
         BagPercepCurrent.estimators_ = [pool.estimators_[score_index[0]]]
         best_score = BagPercepCurrent.score(x_validation, y_validation)
+        best_score_test = BagPercepCurrent.score(x_test, y_test)
+        metrics = (best_score_test,) + self.calc_metrics(BagPercepCurrent.predict(x_test), y_test)
         best_index = 1
         best_score_test = 0
+        diversity_kappa = 0
         for i, j in enumerate(list(score_index[1:])):
             BagPercepCurrent.estimators_ += [pool.estimators_[j]]
             score_current = BagPercepCurrent.score(x_validation, y_validation)
@@ -215,10 +231,12 @@ class Main:
                 best_score = score_current
                 best_index = i
                 best_score_test = BagPercepCurrent.score(x_test, y_test)
+                metrics = (best_score_test,) + self.calc_metrics(BagPercepCurrent.predict(x_test), y_test)
+                diversity_kappa = self.pairwise_diversity_measure(BagPercepCurrent, len(BagPercepCurrent.estimators_), x_validation)
 
         best_index += 2
         # print("best index", best_index, best_score, best_score_test)
-        return best_score_test
+        return (metrics) +  (diversity_kappa,)
 
 # =============================================================================================================================
 
