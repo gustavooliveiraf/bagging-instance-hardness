@@ -114,13 +114,24 @@ class Main:
 
         return (proc_auc_score_temp, geometric_mean_score_temp, f1_score_temp)
 
-    def pairwise_diversity_measure(self, BagPercep, pool_size, x):
-        comb = combinations(range(pool_size), 2)
+    def pairwise_diversity_measure(self, BagPercep, ensemble_size, x):
+        comb = combinations(range(ensemble_size), 2)
         kappa = 0
         for tupla in comb:
             kappa += cohen_kappa_score(BagPercep.estimators_[tupla[0]].predict(x), BagPercep.estimators_[tupla[1]].predict(x))
 
-        return (2/(pool_size*(pool_size-1)))*kappa
+        return (2/(ensemble_size*(ensemble_size-1)))*kappa
+
+    def disagreement_diversity_measure(self, BagPercep, ensemble_size, x):
+        comb = combinations(range(ensemble_size), 2)
+        accumulator, size_x = 0, len(x)
+        for tupla in comb:
+            differs = sum(np.array(BagPercep.estimators_[tupla[0]].predict(x)) != np.array(BagPercep.estimators_[tupla[1]].predict(x)))
+            accumulator += differs/size_x
+
+        return (2/(ensemble_size*(ensemble_size-1)))*accumulator
+
+
 
 # =============================================================================================================================
 
@@ -128,8 +139,8 @@ class Main:
         score_pruning = 0
         score_pool = 0
 
-        score_pruning = (0,0,0,0,0)
-        score_pool = (0,0,0,0,0)
+        score_pruning = (0,0,0,0,0,0)
+        score_pool = (0,0,0,0,0,0)
         for i in range(n_times):
             skf = StratifiedKFold(n_splits=k_fold,shuffle=True)
 
@@ -149,8 +160,9 @@ class Main:
 
                 BagPercep = BaggingClassifier(linear_model.Perceptron(max_iter=5), self.pool_size)
                 BagPercep.fit(x_train, y_train)
-                diversity = self.pairwise_diversity_measure(BagPercep, len(BagPercep.estimators_), X_test)
-                score_pool_temp = (BagPercep.score(X_test, Y_test), ) + self.calc_metrics(BagPercep.predict(X_test), Y_test) + (diversity, )
+                kappa_diversity = self.pairwise_diversity_measure(BagPercep, len(BagPercep.estimators_), X_test)
+                disagreement_diversity_ = self.disagreement_diversity_measure(BagPercep, len(BagPercep.estimators_), X_test)
+                score_pool_temp = (BagPercep.score(X_test, Y_test), ) + self.calc_metrics(BagPercep.predict(X_test), Y_test) + (kappa_diversity, disagreement_diversity_, )
                 
                 score_pool = tuple(map(sum, zip(score_pool, score_pool_temp)))
 
@@ -161,11 +173,11 @@ class Main:
                 # score_pruning_temp = self.reduce_error(BagPercep, score, x_train, y_train, X_validationLess, Y_validationLess, X_test, Y_test)
                 
                 score = self.sort_score(BagPercep, x_train, y_train) # so executar uma vez ------------
-                # score_pruning_temp = self.reduce_error(BagPercep, score, x_train, y_train, x_train, y_train, X_test, Y_test)
+                score_pruning_temp = self.reduce_error(BagPercep, score, x_train, y_train, x_train, y_train, X_test, Y_test)
 
                 # score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, X_validationGreater, Y_validationGreater, X_test, Y_test)
                 # score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, X_validationLess, Y_validationLess, X_test, Y_test)
-                score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, x_train, y_train, X_test, Y_test)
+                # score_pruning_temp = self.best_first(BagPercep, score, x_train, y_train, x_train, y_train, X_test, Y_test)
                 score_pruning = tuple(map(sum, zip(score_pruning, score_pruning_temp)))
 
                 print(score_pool_temp, "---", score_pruning_temp)
@@ -192,7 +204,6 @@ class Main:
             best_score_test = BagPercepCurrent.score(x_test, y_test)
 
             metrics = (best_score_test,) + self.calc_metrics(BagPercepCurrent.predict(x_test), y_test)
-            # print(metrics)
 
             for i in list(score_index):
                 if i not in ensemble_index:
@@ -207,10 +218,11 @@ class Main:
                 ensemble.append(pool.estimators_[index_best_score])
             else:
                 # print("best index", len(ensemble), best_score, best_score_test)
-                diversity_kappa = self.pairwise_diversity_measure(BagPercepCurrent, len(BagPercepCurrent.estimators_), x_validation)
-                return [metrics, diversity_kappa]
+                kappa_diversity = self.pairwise_diversity_measure(BagPercepCurrent, len(BagPercepCurrent.estimators_), x_test)
+                disagreement_diversity_ = self.disagreement_diversity_measure(BagPercepCurrent, len(BagPercepCurrent.estimators_), x_test)
+                return (metrics) + (kappa_diversity, disagreement_diversity_, )
             if len(ensemble_index) == self.pool_size:
-                return [metrics, diversity_kappa]
+                return (metrics) + (kappa_diversity, disagreement_diversity_, )
 
     def best_first(self, pool, score_index, x_train, y_train,  x_validation, y_validation, x_test, y_test):
         BagPercepCurrent = BaggingClassifier(linear_model.Perceptron(max_iter=5), self.pool_size)
@@ -232,7 +244,7 @@ class Main:
                 best_index = i
                 best_score_test = BagPercepCurrent.score(x_test, y_test)
                 metrics = (best_score_test,) + self.calc_metrics(BagPercepCurrent.predict(x_test), y_test)
-                diversity_kappa = self.pairwise_diversity_measure(BagPercepCurrent, len(BagPercepCurrent.estimators_), x_validation)
+                diversity_kappa = self.pairwise_diversity_measure(BagPercepCurrent, len(BagPercepCurrent.estimators_), x_teste)
 
         best_index += 2
         # print("best index", best_index, best_score, best_score_test)
